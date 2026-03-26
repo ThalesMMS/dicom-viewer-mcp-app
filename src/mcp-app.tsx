@@ -53,24 +53,23 @@ function DicomViewerApp() {
     }
   }, [app]);
 
+  useEffect(() => {
+    if (error) {
+      // Open WebUI injects its own lightweight MCP App bridge instead of the
+      // ext-apps host expected by useApp(). In that environment the viewer can
+      // still render normally from the server-injected image payloads, so this
+      // connection error should not block the UI.
+      console.warn("Falling back to standalone MCP app mode:", error);
+    }
+  }, [error]);
+
   if (error) {
-    return (
-      <div className={styles.error}>
-        <div className={styles.errorTitle}>Connection Error</div>
-        <div className={styles.errorMessage}>{error.message}</div>
-      </div>
-    );
+    return <DicomViewerInner hostContext={hostContext} />;
   }
 
-  if (!app) {
-    return (
-      <div className={styles.loading}>
-        <div className={styles.spinner} />
-        <div>Connecting...</div>
-      </div>
-    );
-  }
-
+  // When hosted in Open WebUI there is no official ext-apps bridge, so `app`
+  // stays undefined forever. The viewer does not depend on host APIs for basic
+  // rendering, so we degrade gracefully and show the image series anyway.
   return <DicomViewerInner hostContext={hostContext} />;
 }
 
@@ -275,11 +274,6 @@ function DicomViewerInner({ hostContext }: DicomViewerInnerProps) {
           <button onClick={handleZoomIn} title="Zoom In">+</button>
           <button onClick={handleReset} title="Reset View">Reset</button>
         </div>
-      </div>
-
-      {/* Help text */}
-      <div className={styles.helpText}>
-        Scroll: navigate slices | Ctrl+Scroll: zoom | Drag: pan | Arrow keys: navigate
       </div>
     </main>
   );
