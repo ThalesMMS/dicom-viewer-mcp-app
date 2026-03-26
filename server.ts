@@ -233,7 +233,7 @@ export function createServer(): McpServer {
       title: "View DICOM",
       description: "Display DICOM medical images from the ./dicom/ folder. Supports viewing entire series with navigation controls.",
       inputSchema: {},
-      _meta: { ui: { resourceUri } },
+      _meta: { ui: { resourceUri, maxHeight: 480 } },
     },
     async (): Promise<CallToolResult> => {
       return {
