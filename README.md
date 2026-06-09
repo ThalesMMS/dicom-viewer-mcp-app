@@ -1,6 +1,6 @@
-# DICOM Viewer MCP Prototype
+# DICOM Viewer MCP App
 
-A prototype MCP (Model Context Protocol) App that displays DICOM medical images directly in Claude Desktop. Built using the [MCP Apps SDK](https://github.com/modelcontextprotocol/ext-apps).
+A prototype MCP (Model Context Protocol) App that displays DICOM medical images directly within LLM chat interfaces, including Claude Desktop. Built using the [MCP Apps SDK](https://github.com/modelcontextprotocol/ext-apps).
 
 ![DICOM Viewer Screenshot](screenshot.png)
 
@@ -35,8 +35,8 @@ This approach avoids CSP (Content Security Policy) restrictions in Claude Deskto
 
 ```bash
 # Clone the repository
-git clone https://github.com/ThalesMMS/dicom-viewer-mcp-prototype.git
-cd dicom-viewer-mcp-prototype
+git clone https://github.com/ThalesMMS/dicom-viewer-mcp-app.git
+cd dicom-viewer-mcp-app
 
 # Install dependencies
 npm install
@@ -71,7 +71,7 @@ Add the server to your Claude Desktop configuration:
     "dicom-viewer": {
       "command": "node",
       "args": [
-        "/absolute/path/to/dicom-viewer-mcp-prototype/dist/index.js",
+        "/absolute/path/to/dicom-viewer-mcp-app/dist/index.js",
         "--stdio"
       ]
     }
@@ -111,7 +111,7 @@ npm run dev
 ## Project Structure
 
 ```
-dicom-viewer-mcp-prototype/
+dicom-viewer-mcp-app/
 ├── dicom/                  # Place DICOM files here (a single series)
 │   └── .gitkeep
 ├── src/
@@ -146,9 +146,17 @@ Currently supports uncompressed DICOM files (Explicit/Implicit VR Little Endian)
 - All slices are loaded at once (may be slow for very large series)
 - Single series at a time
 
+## Citation
+
+If you use this software, please cite it using the metadata in [CITATION.cff](CITATION.cff):
+
+```text
+Thales Matheus Mendonça Santos. DICOM Viewer MCP App. Version 1.0.0. 2026-06-08. https://github.com/ThalesMMS/dicom-viewer-mcp-app
+```
+
 ## Author
 
-**Thales Matheus** - [GitHub](https://github.com/ThalesMMS)
+**Thales Matheus Mendonça Santos** - [GitHub](https://github.com/ThalesMMS)
 
 ## License
 
