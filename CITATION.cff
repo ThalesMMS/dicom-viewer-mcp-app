@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+
+title: "DICOM Viewer MCP App"
+version: "1.0.0"
+date-released: "2026-06-08"
+
+authors:
+  - family-names: "Santos"
+    given-names: "Thales Matheus Mendonça"
+    alias: "ThalesMMS"
+
+abstract: "A prototype MCP App that displays DICOM medical images directly within LLM chat interfaces, with server-side DICOM parsing, window/level handling, PNG rendering, and interactive slice navigation."
+
+url: "https://github.com/ThalesMMS/dicom-viewer-mcp-app"
+repository-code: "https://github.com/ThalesMMS/dicom-viewer-mcp-app"
+license: "MIT"
+
+keywords:
+  - DICOM
+  - medical imaging
+  - radiology
+  - MCP
+  - Model Context Protocol
+  - LLM
+  - Claude Desktop
+  - TypeScript
