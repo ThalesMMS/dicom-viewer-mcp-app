@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Full pipeline. The dev toolchain (Vitest 5, concurrently 10) requires
+  # Node >= 22.12, so lint/test/build run on Node 22 and 24 only.
+  build:
+    name: ${{ matrix.os }} / Node ${{ matrix.node-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        node-version: [22.x, 24.x]
+        include:
+          - os: windows-latest
+            node-version: 22.x
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Check build output
+        shell: bash
+        run: |
+          missing=0
+          for f in dist/mcp-app.html dist/server.js dist/index.js; do
+            if [ -f "$f" ]; then
+              echo "ok: $f"
+            else
+              echo "::error::missing build output: $f"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+  # The published runtime supports Node >= 20.11 (package.json "engines").
+  # Build with Node 22, then start the built server under Node 20 and check
+  # that it answers an MCP initialize + tools/list over stdio.
+  runtime-node20:
+    name: ubuntu-latest / Node 20.x runtime smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 22.x (build)
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Set up Node.js 20.x (runtime)
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20.x
+
+      - name: Smoke-test the stdio server on Node 20
+        shell: bash
+        run: |
+          node --version
+          mkdir -p "$RUNNER_TEMP/empty-dicom"
+          node --input-type=module -e '
+            import { spawn } from "node:child_process";
+            const child = spawn(process.execPath, ["dist/index.js", "--stdio", "--dir", process.argv[1]], {
+              stdio: ["pipe", "pipe", "inherit"],
+            });
+            const fail = (msg) => { console.error(msg); child.kill(); process.exit(1); };
+            setTimeout(() => fail("timed out waiting for the server"), 20000).unref();
+            child.on("exit", (code) => fail(`server exited early with code ${code}`));
+            const waiting = new Map();
+            let buffer = "";
+            child.stdout.setEncoding("utf8").on("data", (chunk) => {
+              buffer += chunk;
+              let nl;
+              while ((nl = buffer.indexOf("\n")) >= 0) {
+                const line = buffer.slice(0, nl).trim();
+                buffer = buffer.slice(nl + 1);
+                if (!line) continue;
+                const msg = JSON.parse(line);
+                waiting.get(msg.id)?.(msg);
+              }
+            });
+            const send = (msg) => child.stdin.write(JSON.stringify({ jsonrpc: "2.0", ...msg }) + "\n");
+            const request = (id, method, params) =>
+              new Promise((resolve) => { waiting.set(id, resolve); send({ id, method, params }); });
+            const init = await request(1, "initialize", {
+              protocolVersion: "2025-06-18",
+              capabilities: {},
+              clientInfo: { name: "ci-smoke-test", version: "0.0.0" },
+            });
+            if (!init.result) fail(`initialize failed: ${JSON.stringify(init)}`);
+            send({ method: "notifications/initialized" });
+            const list = await request(2, "tools/list", {});
+            const names = (list.result?.tools ?? []).map((t) => t.name);
+            console.log(`server: ${JSON.stringify(init.result.serverInfo)}, tools: ${names.join(", ")}`);
+            if (!names.includes("view-dicom")) fail("view-dicom tool not listed");
+            child.removeAllListeners("exit");
+            child.kill();
+          ' "$RUNNER_TEMP/empty-dicom"

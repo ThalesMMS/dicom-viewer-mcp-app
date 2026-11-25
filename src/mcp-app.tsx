@@ -1,286 +1,266 @@
 /**
- * @file DICOM Viewer MCP App - displays server-rendered DICOM series
+ * @file DICOM Viewer MCP App entry point.
+ *
+ * Data sources, in order of preference:
+ * 1. `window.__DICOM_BOOTSTRAP__` embedded by the server (bridge-less hosts
+ *    such as Open WebUI): rendered directly, no tool calls needed.
+ * 2. The MCP Apps bridge: the view-dicom result arrives via `ontoolresult`
+ *    and pixel data is paged with the app-only get-dicom-slices tool.
+ *
+ * The bridge is always attempted (for theme, display mode and model context),
+ * but a failed or missing connection never blocks bootstrap rendering.
  */
-import type { McpUiHostContext } from "@modelcontextprotocol/ext-apps";
-import { useApp } from "@modelcontextprotocol/ext-apps/react";
-import { StrictMode, useCallback, useEffect, useRef, useState } from "react";
+import type { App, McpUiHostContext } from "@modelcontextprotocol/ext-apps";
+import { useApp, useHostStyleVariables } from "@modelcontextprotocol/ext-apps/react";
+import { StrictMode, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
+import { BOOTSTRAP_GLOBAL, type ViewDicomResult } from "../shared/protocol";
+import { IconExitFullscreen, IconFullscreen } from "./components/Icons";
+import { SkippedBadge } from "./components/SkippedBadge";
+import { StatusScreen } from "./components/StatusScreen";
+import { Viewer } from "./components/Viewer";
+import { useModelContext } from "./hooks/useModelContext";
+import { bootstrapFetcher, bridgeFetcher, callViewDicom, interpretViewResult } from "./host/tools";
+import { seriesLabel } from "./viewer/format";
+import { parseBootstrap } from "./viewer/validate";
 import styles from "./mcp-app.module.css";
 
-// Get embedded data from global variables injected by the server
-declare global {
-  interface Window {
-    __DICOM_IMAGES__?: string[];
-    __DICOM_INFOS__?: Array<{
-      filename: string;
-      width: number;
-      height: number;
-      bitsStored: number;
-      instanceNumber?: number;
-      sliceLocation?: number;
-      photometricInterpretation: string;
-    }>;
-    __SERIES_INFO__?: {
-      patientName?: string;
-      studyDescription?: string;
-      seriesDescription?: string;
-      totalSlices: number;
-      width: number;
-      height: number;
-      bitsStored: number;
-    };
-  }
+const APP_INFO = { name: "DICOM Viewer", version: "2.0.0" };
+/** After this long without a bridge connection, explain the situation. */
+const CONNECT_TIMEOUT_MS = 5000;
+/** Inline height when the host sizes the frame to our content. */
+const INLINE_HEIGHT_PX = 480;
+
+const rawBootstrap: unknown = (globalThis as Record<string, unknown>)[BOOTSTRAP_GLOBAL];
+const bootstrap = rawBootstrap === undefined ? null : parseBootstrap(rawBootstrap);
+if (rawBootstrap !== undefined && !bootstrap) {
+  console.error("[dicom-viewer] Ignoring malformed embedded DICOM payload.");
 }
+const bootstrapFetch = bootstrap ? bootstrapFetcher(bootstrap) : null;
 
-function DicomViewerApp() {
+function DicomApp() {
   const [hostContext, setHostContext] = useState<McpUiHostContext | undefined>();
+  const [view, setView] = useState<ViewDicomResult | null>(bootstrap?.view ?? null);
+  const [toolError, setToolError] = useState<string | null>(null);
+  const [toolPending, setToolPending] = useState(false);
+  const [connectTimedOut, setConnectTimedOut] = useState(false);
+  const [switching, setSwitching] = useState<string | null>(null);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+  const switchRequest = useRef(0);
 
-  const { app, error } = useApp({
-    appInfo: { name: "DICOM Viewer", version: "1.0.0" },
+  const { app, isConnected, error } = useApp({
+    appInfo: APP_INFO,
     capabilities: {},
-    onAppCreated: (app) => {
-      app.onteardown = async () => ({});
-      app.onerror = console.error;
-      app.onhostcontextchanged = (params) => {
-        setHostContext((prev) => ({ ...prev, ...params }));
+    onAppCreated: (created: App) => {
+      created.ontoolinput = () => {
+        if (!bootstrap) setToolPending(true);
       };
+      created.ontoolresult = (result) => {
+        if (bootstrap) return; // The embedded payload is authoritative.
+        const outcome = interpretViewResult(result);
+        if (outcome.ok) {
+          setView(outcome.view);
+          setToolError(null);
+        } else {
+          setToolError(outcome.error);
+        }
+      };
+      created.ontoolcancelled = (params) => {
+        if (bootstrap) return;
+        setToolError(`The tool call was cancelled${params.reason ? `: ${params.reason}` : "."}`);
+      };
+      created.onhostcontextchanged = (ctx) => setHostContext((prev) => ({ ...prev, ...ctx }));
+      created.onteardown = async () => {
+        switchRequest.current++; // Ignore any in-flight series switch.
+        return {};
+      };
+      created.onerror = (err) => console.error("[dicom-viewer] App error:", err);
     },
   });
 
+  useHostStyleVariables(app, app?.getHostContext());
+
   useEffect(() => {
-    if (app) {
-      setHostContext(app.getHostContext());
-    }
+    if (app) setHostContext((prev) => ({ ...app.getHostContext(), ...prev }));
   }, [app]);
 
   useEffect(() => {
-    if (error) {
-      // Open WebUI injects its own lightweight MCP App bridge instead of the
-      // ext-apps host expected by useApp(). In that environment the viewer can
-      // still render normally from the server-injected image payloads, so this
-      // connection error should not block the UI.
-      console.warn("Falling back to standalone MCP app mode:", error);
-    }
+    if (!error) return;
+    // Expected with an embedded payload in bridge-less hosts.
+    (bootstrap ? console.info : console.warn)("[dicom-viewer] No MCP Apps bridge:", error.message);
   }, [error]);
 
-  if (error) {
-    return <DicomViewerInner hostContext={hostContext} />;
-  }
-
-  // When hosted in Open WebUI there is no official ext-apps bridge, so `app`
-  // stays undefined forever. The viewer does not depend on host APIs for basic
-  // rendering, so we degrade gracefully and show the image series anyway.
-  return <DicomViewerInner hostContext={hostContext} />;
-}
-
-interface DicomViewerInnerProps {
-  hostContext?: McpUiHostContext;
-}
-
-function DicomViewerInner({ hostContext }: DicomViewerInnerProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [currentSlice, setCurrentSlice] = useState(0);
-  const [scale, setScale] = useState(1);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStart = useRef({ x: 0, y: 0 });
-  const positionStart = useRef({ x: 0, y: 0 });
-
-  const images = window.__DICOM_IMAGES__ ?? [];
-  const infos = window.__DICOM_INFOS__ ?? [];
-  const seriesInfo = window.__SERIES_INFO__;
-  const totalSlices = images.length;
-
-  // Navigate to specific slice
-  const goToSlice = useCallback((index: number) => {
-    setCurrentSlice(Math.max(0, Math.min(totalSlices - 1, index)));
-  }, [totalSlices]);
-
-  // Handle keyboard navigation
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-        e.preventDefault();
-        goToSlice(currentSlice - 1);
-      } else if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-        e.preventDefault();
-        goToSlice(currentSlice + 1);
-      } else if (e.key === "Home") {
-        e.preventDefault();
-        goToSlice(0);
-      } else if (e.key === "End") {
-        e.preventDefault();
-        goToSlice(totalSlices - 1);
+    if (isConnected || bootstrap) return;
+    const t = setTimeout(() => setConnectTimedOut(true), CONNECT_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, [isConnected]);
+
+  const fetchSlices = useMemo(() => {
+    if (bootstrapFetch) return bootstrapFetch;
+    if (app) return bridgeFetcher(app);
+    return () => Promise.reject(new Error("Not connected to the MCP host."));
+  }, [app]);
+
+  const reportViewState = useModelContext(isConnected ? app : null, view);
+
+  const selectSeries = useCallback(
+    async (seriesInstanceUid: string) => {
+      if (!app || seriesInstanceUid === view?.selected.seriesInstanceUid) return;
+      const request = ++switchRequest.current;
+      setSwitching(seriesInstanceUid);
+      setSwitchError(null);
+      try {
+        const next = await callViewDicom(app, { seriesInstanceUid });
+        if (request === switchRequest.current) setView(next);
+      } catch (err) {
+        if (request === switchRequest.current) {
+          setSwitchError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (request === switchRequest.current) setSwitching(null);
       }
+    },
+    [app, view?.selected.seriesInstanceUid],
+  );
+
+  // Display mode / fullscreen.
+  const displayMode = hostContext?.displayMode ?? "inline";
+  const canFullscreen = isConnected && (hostContext?.availableDisplayModes?.includes("fullscreen") ?? false);
+  const setMode = useCallback(
+    async (mode: "inline" | "fullscreen") => {
+      if (!app) return;
+      try {
+        const result = await app.requestDisplayMode({ mode });
+        setHostContext((prev) => ({ ...prev, displayMode: result.mode }));
+      } catch (err) {
+        console.warn("[dicom-viewer] requestDisplayMode failed:", err);
+      }
+    },
+    [app],
+  );
+
+  useEffect(() => {
+    if (displayMode !== "fullscreen" || !canFullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) void setMode("inline");
     };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [displayMode, canFullscreen, setMode]);
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentSlice, goToSlice, totalSlices]);
+  // Layout: fill the frame when it has a fixed size (fullscreen, fixed
+  // container, or no bridge); otherwise use an intrinsic inline height that
+  // the host can auto-size to.
+  const dims = hostContext?.containerDimensions;
+  const fixedHeight = dims !== undefined && "height" in dims;
+  const maxHeight = dims && "maxHeight" in dims ? dims.maxHeight : undefined;
+  const fill = !isConnected || displayMode === "fullscreen" || fixedHeight;
+  const insets = hostContext?.safeAreaInsets;
+  const mainStyle: CSSProperties = {
+    height: fill ? "100vh" : INLINE_HEIGHT_PX,
+    maxHeight: fill ? undefined : maxHeight,
+    paddingTop: insets?.top,
+    paddingRight: insets?.right,
+    paddingBottom: insets?.bottom,
+    paddingLeft: insets?.left,
+  };
 
-  // Handle mouse wheel - scroll for navigation when not pressing Ctrl, zoom when pressing Ctrl
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-
-    if (e.ctrlKey || e.metaKey) {
-      // Zoom
-      const delta = e.deltaY > 0 ? 0.9 : 1.1;
-      setScale((s) => Math.min(10, Math.max(0.1, s * delta)));
-    } else {
-      // Navigate slices
-      if (e.deltaY > 0) {
-        goToSlice(currentSlice + 1);
-      } else {
-        goToSlice(currentSlice - 1);
-      }
-    }
-  }, [currentSlice, goToSlice]);
-
-  // Handle mouse down for pan
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.button !== 0) return;
-    setIsDragging(true);
-    dragStart.current = { x: e.clientX, y: e.clientY };
-    positionStart.current = { ...position };
-  }, [position]);
-
-  // Handle mouse move for pan
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isDragging) return;
-    const dx = e.clientX - dragStart.current.x;
-    const dy = e.clientY - dragStart.current.y;
-    setPosition({
-      x: positionStart.current.x + dx,
-      y: positionStart.current.y + dy,
-    });
-  }, [isDragging]);
-
-  // Handle mouse up
-  const handleMouseUp = useCallback(() => {
-    setIsDragging(false);
-  }, []);
-
-  // Reset view
-  const handleReset = useCallback(() => {
-    setScale(1);
-    setPosition({ x: 0, y: 0 });
-  }, []);
-
-  // Zoom controls
-  const handleZoomIn = useCallback(() => {
-    setScale((s) => Math.min(10, s * 1.2));
-  }, []);
-
-  const handleZoomOut = useCallback(() => {
-    setScale((s) => Math.max(0.1, s / 1.2));
-  }, []);
-
-  if (images.length === 0) {
-    return (
-      <div className={styles.error}>
-        <div className={styles.errorTitle}>No Images</div>
-        <div className={styles.errorMessage}>No DICOM images found in ./dicom/ folder</div>
-      </div>
+  let content;
+  if (view) {
+    const multi = !bootstrap && view.series.length > 1;
+    const headerStart = (
+      <>
+        {multi ? (
+          <select
+            className={`${styles.select} ${styles.seriesSelect}`}
+            aria-label="Series"
+            value={switching ?? view.selected.seriesInstanceUid}
+            disabled={switching !== null || !app}
+            onChange={(e) => void selectSeries(e.target.value)}
+          >
+            {view.series.map((s) => (
+              <option key={s.seriesInstanceUid} value={s.seriesInstanceUid}>
+                {seriesLabel(s)} ({s.sliceCount})
+              </option>
+            ))}
+          </select>
+        ) : (
+          <span className={styles.seriesTitle} title={view.selected.studyDescription}>
+            {seriesLabel(view.selected)}
+          </span>
+        )}
+        {switching && (
+          <span className={styles.inlineStatus} role="status">
+            <span className={styles.spinner} aria-hidden="true" /> Opening series…
+          </span>
+        )}
+        {switchError && (
+          <span className={styles.inlineError} role="alert">
+            Couldn’t open series: {switchError}
+          </span>
+        )}
+        <SkippedBadge skipped={view.skipped} />
+      </>
     );
+    const headerEnd = canFullscreen ? (
+      <button
+        type="button"
+        className={styles.iconButton}
+        aria-label={displayMode === "fullscreen" ? "Exit fullscreen" : "Enter fullscreen"}
+        aria-pressed={displayMode === "fullscreen"}
+        title={displayMode === "fullscreen" ? "Exit fullscreen (Esc)" : "Fullscreen"}
+        onClick={() => void setMode(displayMode === "fullscreen" ? "inline" : "fullscreen")}
+      >
+        {displayMode === "fullscreen" ? <IconExitFullscreen /> : <IconFullscreen />}
+      </button>
+    ) : null;
+    content = (
+      <Viewer
+        key={view.selected.seriesInstanceUid}
+        view={view}
+        fetchSlices={fetchSlices}
+        headerStart={headerStart}
+        headerEnd={headerEnd}
+        onViewStateChange={reportViewState}
+      />
+    );
+  } else if (toolError) {
+    content = (
+      <StatusScreen title="Couldn’t open the DICOM series" tone="error">
+        {toolError}
+      </StatusScreen>
+    );
+  } else if (!isConnected && (error || connectTimedOut)) {
+    content = (
+      <StatusScreen title="No MCP Apps host connection">
+        <p>
+          This viewer receives its images from the <code>view-dicom</code> tool through an MCP Apps host, and none
+          answered.
+        </p>
+        <p>
+          For hosts without MCP Apps support, start the server with <code>--embed-series</code> (or{" "}
+          <code>DICOM_EMBED=1</code>) so the series is embedded in the page.
+        </p>
+      </StatusScreen>
+    );
+  } else if (isConnected) {
+    content = (
+      <StatusScreen title={toolPending ? "Opening the DICOM series…" : "Waiting for the view-dicom result…"} busy />
+    );
+  } else {
+    content = <StatusScreen title="Connecting to the host…" busy />;
   }
-
-  const currentInfo = infos[currentSlice];
-  const infoText = seriesInfo
-    ? `${seriesInfo.width} x ${seriesInfo.height} | ${seriesInfo.bitsStored}-bit`
-    : "";
 
   return (
-    <main
-      className={styles.main}
-      style={{
-        paddingTop: hostContext?.safeAreaInsets?.top,
-        paddingRight: hostContext?.safeAreaInsets?.right,
-        paddingBottom: hostContext?.safeAreaInsets?.bottom,
-        paddingLeft: hostContext?.safeAreaInsets?.left,
-      }}
-    >
-      <div className={styles.header}>
-        <div className={styles.headerLeft}>
-          <h1 className={styles.title}>DICOM Viewer</h1>
-          {seriesInfo?.seriesDescription && (
-            <span className={styles.seriesDesc}>{seriesInfo.seriesDescription}</span>
-          )}
-        </div>
-        <span className={styles.info}>{infoText}</span>
-      </div>
-
-      <div
-        ref={containerRef}
-        className={styles.viewportContainer}
-        onWheel={handleWheel}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-      >
-        <img
-          src={images[currentSlice]}
-          alt={`DICOM Slice ${currentSlice + 1}`}
-          className={styles.image}
-          style={{
-            transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
-            cursor: isDragging ? "grabbing" : "grab",
-          }}
-          draggable={false}
-        />
-
-        {/* Slice indicator overlay */}
-        <div className={styles.sliceOverlay}>
-          <span className={styles.sliceNumber}>{currentSlice + 1} / {totalSlices}</span>
-          {currentInfo?.instanceNumber !== undefined && (
-            <span className={styles.instanceNumber}>Instance: {currentInfo.instanceNumber}</span>
-          )}
-        </div>
-      </div>
-
-      <div className={styles.controls}>
-        {/* Slice navigation */}
-        {totalSlices > 1 && (
-          <div className={styles.sliceControls}>
-            <button
-              onClick={() => goToSlice(currentSlice - 1)}
-              disabled={currentSlice === 0}
-              title="Previous slice (←)"
-            >
-              ◀
-            </button>
-            <input
-              type="range"
-              min={0}
-              max={totalSlices - 1}
-              value={currentSlice}
-              onChange={(e) => goToSlice(parseInt(e.target.value, 10))}
-              className={styles.slider}
-            />
-            <button
-              onClick={() => goToSlice(currentSlice + 1)}
-              disabled={currentSlice === totalSlices - 1}
-              title="Next slice (→)"
-            >
-              ▶
-            </button>
-          </div>
-        )}
-
-        {/* Zoom controls */}
-        <div className={styles.zoomControls}>
-          <button onClick={handleZoomOut} title="Zoom Out">−</button>
-          <span className={styles.zoomLevel}>{Math.round(scale * 100)}%</span>
-          <button onClick={handleZoomIn} title="Zoom In">+</button>
-          <button onClick={handleReset} title="Reset View">Reset</button>
-        </div>
-      </div>
+    <main className={`${styles.main} ${displayMode === "fullscreen" ? styles.fullscreen : ""}`} style={mainStyle}>
+      {content}
     </main>
   );
 }
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <DicomViewerApp />
+    <DicomApp />
   </StrictMode>,
 );

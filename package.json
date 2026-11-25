@@ -1,11 +1,11 @@
 {
-  "name": "dicom-viewer-mcp-prototype",
+  "name": "dicom-viewer-mcp-app",
   "version": "1.0.0",
   "type": "module",
   "description": "A prototype MCP App that displays DICOM medical images in Claude Desktop",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ThalesMMS/dicom-viewer-mcp-prototype"
+    "url": "https://github.com/ThalesMMS/dicom-viewer-mcp-app"
   },
   "author": "Thales Matheus (https://github.com/ThalesMMS)",
   "license": "MIT",
@@ -24,12 +24,15 @@
     }
   },
   "scripts": {
-    "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && bun build server.ts --outdir dist --target node && bun build main.ts --outfile dist/index.js --target node --external \"./server.js\" --banner \"#!/usr/bin/env node\"",
+    "build": "tsc --noEmit && cross-env INPUT=mcp-app.html vite build && tsc -p tsconfig.server.json && node scripts/build-server.mjs",
     "watch": "cross-env INPUT=mcp-app.html vite build --watch",
-    "serve": "bun --watch main.ts",
+    "serve": "tsx watch main.ts",
     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
-    "dev": "cross-env NODE_ENV=development concurrently 'npm run watch' 'npm run serve'",
-    "prepublishOnly": "npm run build"
+    "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
+    "prepublishOnly": "npm run build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "^1.0.0",
@@ -39,20 +42,30 @@
     "express": "^5.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "sharp": "^0.35.0",
     "zod": "^4.1.13"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.0",
-    "@types/node": "22.10.0",
+    "@types/node": "^22.20.7",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^10.0.5",
     "cross-env": "^10.1.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.15.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.14.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.74.0",
     "vite": "^6.4.3",
-    "vite-plugin-singlefile": "^2.3.0"
+    "vite-plugin-singlefile": "^2.3.0",
+    "vitest": "^5.1.2"
+  },
+  "engines": {
+    "node": ">=20.11"
   }
 }

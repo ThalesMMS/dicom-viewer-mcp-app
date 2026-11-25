@@ -11,7 +11,7 @@ authors:
     given-names: "Thales Matheus Mendonça"
     alias: "ThalesMMS"
 
-abstract: "A prototype MCP App that displays DICOM medical images directly within LLM chat interfaces, with server-side DICOM parsing, window/level handling, PNG rendering, and interactive slice navigation."
+abstract: "A prototype MCP App that displays DICOM medical images directly within LLM chat interfaces, with server-side DICOM parsing, on-demand paging of 16-bit pixel data, client-side window/level, and interactive multi-series slice navigation."
 
 url: "https://github.com/ThalesMMS/dicom-viewer-mcp-app"
 repository-code: "https://github.com/ThalesMMS/dicom-viewer-mcp-app"

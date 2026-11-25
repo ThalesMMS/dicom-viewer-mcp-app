@@ -1,7 +1,8 @@
 /**
- * Entry point for running the MCP server.
- * Run with: npx @modelcontextprotocol/server-dicom-viewer
- * Or: node dist/index.js [--stdio]
+ * Entry point of the `mcp-server-dicom-viewer` bin.
+ *
+ * Run with: node dist/index.js [--stdio] [--dir <path>] [--embed-series]
+ * (development: npx tsx main.ts ...). See `--help` for every option.
  */
 
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
@@ -10,6 +11,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import cors from "cors";
 import type { Request, Response } from "express";
+import { CliError, HELP_TEXT, isLoopbackHost, parseCli, type CliOptions } from "./server/cli.js";
 import { createServer } from "./server.js";
 
 /**
@@ -19,11 +21,23 @@ import { createServer } from "./server.js";
  */
 export async function startStreamableHTTPServer(
   createServer: () => McpServer,
+  options: Pick<CliOptions, "host" | "port" | "corsOrigins">,
 ): Promise<void> {
-  const port = parseInt(process.env.PORT ?? "3001", 10);
+  const { host, port, corsOrigins } = options;
 
-  const app = createMcpExpressApp({ host: "0.0.0.0" });
-  app.use(cors());
+  if (!isLoopbackHost(host)) {
+    console.error(
+      `WARNING: binding to non-loopback address ${host}. This server has NO authentication and ` +
+        "serves medical images to anyone who can reach it; DNS-rebinding protection is off. " +
+        "Only do this on a trusted network or behind an authenticating proxy.",
+    );
+  }
+
+  // createMcpExpressApp enables DNS-rebinding (Host header) protection for loopback hosts.
+  const app = createMcpExpressApp({ host });
+  if (corsOrigins.length > 0) {
+    app.use(cors({ origin: corsOrigins, exposedHeaders: ["Mcp-Session-Id"] }));
+  }
 
   app.all("/mcp", async (req: Request, res: Response) => {
     const server = createServer();
@@ -51,12 +65,13 @@ export async function startStreamableHTTPServer(
     }
   });
 
-  const httpServer = app.listen(port, (err) => {
+  const httpServer = app.listen(port, host, (err?: Error) => {
     if (err) {
       console.error("Failed to start server:", err);
       process.exit(1);
     }
-    console.log(`MCP server listening on http://localhost:${port}/mcp`);
+    const shownHost = host.includes(":") ? `[${host}]` : host;
+    console.log(`MCP server listening on http://${shownHost}:${port}/mcp`);
   });
 
   const shutdown = () => {
@@ -69,21 +84,44 @@ export async function startStreamableHTTPServer(
 }
 
 /**
- * Starts an MCP server with stdio transport.
+ * Starts an MCP server with stdio transport. stdout carries only protocol
+ * messages, so console.log/info/debug are redirected to stderr.
  *
  * @param createServer - Factory function that creates a new McpServer instance.
  */
-export async function startStdioServer(
-  createServer: () => McpServer,
-): Promise<void> {
+export async function startStdioServer(createServer: () => McpServer): Promise<void> {
+  console.log = console.error;
+  console.info = console.error;
+  console.debug = console.error;
   await createServer().connect(new StdioServerTransport());
 }
 
 async function main() {
-  if (process.argv.includes("--stdio")) {
-    await startStdioServer(createServer);
+  let options: CliOptions;
+  try {
+    options = parseCli(process.argv.slice(2));
+  } catch (error) {
+    if (error instanceof CliError) {
+      console.error(`${error.message}\n\n${HELP_TEXT}`);
+      process.exit(2);
+    }
+    throw error;
+  }
+
+  if (options.help) {
+    process.stdout.write(HELP_TEXT);
+    return;
+  }
+
+  const factory = () => createServer({ dicomDir: options.dicomDir, embedSeries: options.embedSeries });
+  console.error(
+    `[dicom-viewer] DICOM directory: ${options.dicomDir}` + (options.embedSeries ? " (embed-series on)" : ""),
+  );
+
+  if (options.stdio) {
+    await startStdioServer(factory);
   } else {
-    await startStreamableHTTPServer(createServer);
+    await startStreamableHTTPServer(factory, options);
   }
 }
 

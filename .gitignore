@@ -1,7 +1,17 @@
 node_modules/
 dist/
+coverage/
+.vite/
 
-# DICOM files (large, users add their own)
+# Logs and local environment files
+*.log
+.env*
+
+# OS noise
 .DS_Store
-dicom/
-!dicom/gitkeep
+Thumbs.db
+
+# DICOM files (large, possibly sensitive; users add their own).
+# Ignore the folder's contents but keep the placeholder so it exists in clones.
+dicom/*
+!dicom/.gitkeep

@@ -1,16 +1,92 @@
+/*
+ * Theme tokens. Host style variables (applied by useHostStyleVariables on
+ * <html>) take precedence; the fallbacks follow data-theme (set from the host
+ * theme) or, without a host, prefers-color-scheme.
+ */
+:root {
+  color-scheme: light dark;
+  --dv-fb-bg: #ffffff;
+  --dv-fb-bg-2: #f3f4f6;
+  --dv-fb-bg-3: #e5e7eb;
+  --dv-fb-text: #111827;
+  --dv-fb-text-2: #4b5563;
+  --dv-fb-border: #d1d5db;
+  --dv-fb-ring: #2563eb;
+  --dv-fb-accent-bg: #dbeafe;
+  --dv-fb-accent-text: #1e3a8a;
+  --dv-fb-danger: #b91c1c;
+  --dv-fb-warning: #92400e;
+  --dv-fb-warning-bg: #fef3c7;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --dv-fb-bg: #1c1c1e;
+    --dv-fb-bg-2: #26262a;
+    --dv-fb-bg-3: #34343a;
+    --dv-fb-text: #f3f4f6;
+    --dv-fb-text-2: #b4b8c0;
+    --dv-fb-border: #45454d;
+    --dv-fb-ring: #60a5fa;
+    --dv-fb-accent-bg: #1e3a5f;
+    --dv-fb-accent-text: #dbeafe;
+    --dv-fb-danger: #fca5a5;
+    --dv-fb-warning: #fcd34d;
+    --dv-fb-warning-bg: #3b2f12;
+  }
+}
+
+:root[data-theme="dark"] {
+  --dv-fb-bg: #1c1c1e;
+  --dv-fb-bg-2: #26262a;
+  --dv-fb-bg-3: #34343a;
+  --dv-fb-text: #f3f4f6;
+  --dv-fb-text-2: #b4b8c0;
+  --dv-fb-border: #45454d;
+  --dv-fb-ring: #60a5fa;
+  --dv-fb-accent-bg: #1e3a5f;
+  --dv-fb-accent-text: #dbeafe;
+  --dv-fb-danger: #fca5a5;
+  --dv-fb-warning: #fcd34d;
+  --dv-fb-warning-bg: #3b2f12;
+}
+
+:root {
+  --dv-bg: var(--color-background-primary, var(--dv-fb-bg));
+  --dv-bg-2: var(--color-background-secondary, var(--dv-fb-bg-2));
+  --dv-bg-3: var(--color-background-tertiary, var(--dv-fb-bg-3));
+  --dv-text: var(--color-text-primary, var(--dv-fb-text));
+  --dv-text-2: var(--color-text-secondary, var(--dv-fb-text-2));
+  --dv-border: var(--color-border-primary, var(--dv-fb-border));
+  --dv-ring: var(--color-ring-primary, var(--dv-fb-ring));
+  --dv-accent-bg: var(--color-background-info, var(--dv-fb-accent-bg));
+  --dv-accent-text: var(--color-text-info, var(--dv-fb-accent-text));
+  --dv-danger: var(--color-text-danger, var(--dv-fb-danger));
+  --dv-warning: var(--color-text-warning, var(--dv-fb-warning));
+  --dv-warning-bg: var(--color-background-warning, var(--dv-fb-warning-bg));
+  --dv-radius: var(--border-radius-md, 6px);
+  --dv-radius-sm: var(--border-radius-sm, 4px);
+  --dv-font: var(--font-sans, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+  --dv-font-mono: var(--font-mono, ui-monospace, "SFMono-Regular", Consolas, monospace);
+  --dv-text-sm: var(--font-text-sm-size, 13px);
+  --dv-text-xs: var(--font-text-xs-size, 12px);
+}
+
 * {
   box-sizing: border-box;
 }
 
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
-  font-family: system-ui, -apple-system, sans-serif;
-  font-size: 1rem;
-  height: 100%;
+  background: var(--dv-bg);
+  color: var(--dv-text);
+  font-family: var(--dv-font);
+  font-size: var(--dv-text-sm);
   overflow: hidden;
 }
 
 #root {
-  height: 100%;
+  width: 100%;
 }
