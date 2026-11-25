@@ -33,14 +33,14 @@
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "^1.0.0",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "cors": "^2.8.5",
     "dicom-parser": "^1.8.21",
     "express": "^5.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "sharp": "^0.35.0",
-    "zod": "^4.1.13"
+    "sharp": "^0.35.5",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
@@ -49,10 +49,10 @@
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^4.3.4",
-    "concurrently": "^10.0.5",
+    "concurrently": "^10.0.7",
     "cross-env": "^10.1.0",
     "typescript": "^5.9.3",
-    "vite": "^6.4.3",
+    "vite": "^6.4.6",
     "vite-plugin-singlefile": "^2.3.0"
   }
 }
